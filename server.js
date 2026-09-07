@@ -4,7 +4,8 @@ const path = require("node:path");
 const crypto = require("node:crypto");
 
 const PORT = Number(process.env.PORT || 3000);
-const ROOT = path.join(__dirname, "v3");
+const PUBLIC_ROOTS = [path.join(__dirname, "v3"), path.join(__dirname, "Moda-Center-main", "v3"), __dirname];
+const ROOT = PUBLIC_ROOTS.find(directory => fs.existsSync(path.join(directory, "index.html"))) || __dirname;
 const DATA_FILE = path.join(__dirname, "server", "data.json");
 const MAX_BODY_SIZE = 3 * 1024 * 1024;
 const MIME_TYPES = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json; charset=utf-8", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".svg": "image/svg+xml", ".webp": "image/webp" };
@@ -19,10 +20,16 @@ function readDatabase() {
 }
 
 function writeDatabase(database) {
+    fs.mkdirSync(path.dirname(DATA_FILE), { recursive: true });
     const temporaryFile = `${DATA_FILE}.${process.pid}.tmp`;
     fs.writeFileSync(temporaryFile, JSON.stringify(database, null, 2));
-    fs.rmSync(DATA_FILE, { force: true });
-    fs.renameSync(temporaryFile, DATA_FILE);
+    try {
+        fs.renameSync(temporaryFile, DATA_FILE);
+    } catch (error) {
+        if (!['EPERM', 'EEXIST', 'ENOTEMPTY'].includes(error.code)) throw error;
+        fs.rmSync(DATA_FILE, { force: true });
+        fs.renameSync(temporaryFile, DATA_FILE);
+    }
 }
 
 function sendJson(response, status, payload) {
