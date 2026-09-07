@@ -26,6 +26,33 @@ const title = document.getElementById("authTitle");
 const description = document.getElementById("authDescription");
 const toast = document.getElementById("toast");
 
+// ======================================================
+// FETCH COM NOVA TENTATIVA AUTOMÁTICA
+// ======================================================
+// O plano gratuito do Render "adormece" o servidor depois de um
+// tempo sem receber requisições. A primeira chamada depois disso
+// pode falhar enquanto o servidor acorda (isso pode levar de 30s a
+// mais de 1 minuto). Em vez de mostrar logo um erro pra pessoa
+// usuária, tentamos de novo automaticamente algumas vezes antes de
+// desistir, avisando o motivo enquanto isso.
+async function fetchWithRetry(url, options, { attempts = 3, delayMs = 4000, onRetry } = {}) {
+    let lastError;
+
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+        try {
+            return await fetch(url, options);
+        } catch (error) {
+            lastError = error;
+            if (attempt < attempts) {
+                onRetry?.(attempt);
+                await new Promise(resolve => setTimeout(resolve, delayMs));
+            }
+        }
+    }
+
+    throw lastError;
+}
+
 async function syncLegacyUsers() {
     if (!API_ENABLED) return;
     try {
@@ -427,14 +454,18 @@ document
 
         if (API_ENABLED) {
             try {
-                const response = await fetch("/api/auth/register", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, email, password, profile }) });
+                const response = await fetchWithRetry(
+                    "/api/auth/register",
+                    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, email, password, profile }) },
+                    { onRetry: () => setNote("registerNote", "O servidor está iniciando, aguarde alguns segundos...") }
+                );
                 if (!response.ok) { const data = await response.json(); setNote("registerNote", data.error || "Não foi possível criar a conta."); return; }
                 event.currentTarget.reset();
                 switchTab("login");
                 setNote("loginNote", "Conta criada. Agora entre com seus dados.");
                 return;
             } catch (error) {
-                setNote("registerNote", "Servidor indisponível. Tente novamente.");
+                setNote("registerNote", "Não foi possível conectar ao servidor. Verifique sua internet e tente novamente em instantes.");
                 return;
             }
         }
@@ -553,7 +584,11 @@ document
 
         if (API_ENABLED && !(email === "admin" && password === "123456")) {
             try {
-                const response = await fetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, password }) });
+                const response = await fetchWithRetry(
+                    "/api/auth/login",
+                    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, password }) },
+                    { onRetry: () => setNote("loginNote", "O servidor está iniciando, aguarde alguns segundos...") }
+                );
                 if (!response.ok) {
                     const localUser = getUsers().find(item => item.email === email);
                     setNote("loginNote", localUser ? "Esta conta ainda não foi publicada. Abra este mesmo link no dispositivo onde a conta foi criada e tente novamente." : "E-mail ou senha inválidos.");
@@ -568,7 +603,7 @@ document
                     database.saveStores(stores);
                 }
             } catch (error) {
-                setNote("loginNote", "Não foi possível conectar ao servidor.");
+                setNote("loginNote", "Não foi possível conectar ao servidor. Verifique sua internet e tente novamente em instantes.");
                 return;
             }
         }
