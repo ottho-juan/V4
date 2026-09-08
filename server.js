@@ -22,13 +22,16 @@ function readDatabase() {
 function writeDatabase(database) {
     fs.mkdirSync(path.dirname(DATA_FILE), { recursive: true });
     const temporaryFile = `${DATA_FILE}.${process.pid}.tmp`;
-    fs.writeFileSync(temporaryFile, JSON.stringify(database, null, 2));
+    const content = JSON.stringify(database, null, 2);
+    fs.writeFileSync(temporaryFile, content);
     try {
         fs.renameSync(temporaryFile, DATA_FILE);
     } catch (error) {
-        if (!['EPERM', 'EEXIST', 'ENOTEMPTY'].includes(error.code)) throw error;
-        fs.rmSync(DATA_FILE, { force: true });
-        fs.renameSync(temporaryFile, DATA_FILE);
+        try {
+            fs.writeFileSync(DATA_FILE, content);
+        } finally {
+            fs.rmSync(temporaryFile, { force: true });
+        }
     }
 }
 
@@ -72,8 +75,9 @@ async function handleApi(request, response, url) {
     if (request.method === "PUT" && storeMatch) {
         const ownerId = decodeURIComponent(storeMatch[1]);
         const input = await readBody(request);
-        if (String(input.ownerId) !== ownerId || !String(input.name || "").trim() || !String(input.segments || "").trim()) return sendJson(response, 400, { error: "Dados da loja invalidos" });
-        database.stores[ownerId] = { name: String(input.name).trim(), segments: Array.isArray(input.segments) ? input.segments : String(input.segments).split(",").map(item => item.trim()).filter(Boolean), image: input.image || null, createdAt: input.createdAt || Date.now() };
+        const segments = Array.isArray(input.segments) ? input.segments.map(item => String(item).trim()).filter(Boolean) : String(input.segments || "").split(",").map(item => item.trim()).filter(Boolean);
+        if (String(input.ownerId) !== ownerId || !String(input.name || "").trim() || !segments.length) return sendJson(response, 400, { error: "Dados da loja invalidos" });
+        database.stores[ownerId] = { name: String(input.name).trim(), segments, image: input.image || null, createdAt: input.createdAt || Date.now() };
         writeDatabase(database);
         return sendJson(response, 200, { store: database.stores[ownerId] });
     }
